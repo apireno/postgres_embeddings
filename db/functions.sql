@@ -3,7 +3,6 @@
 -- Function to calculate the mean (average) of an array of vectors.
 -- This is a crucial helper for handling OOV words by averaging their n-gram embeddings.
 
-DROP FUNCTION IF EXISTS demo_mean_vector(vector[]);
 CREATE OR REPLACE FUNCTION demo_mean_vector(vectors vector[])
  RETURNS vector
  LANGUAGE plpgsql
@@ -123,7 +122,6 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 --   - 'demo_generate_edgengrams' (for generating prefixes/n-grams from OOV words)
 --   - 'demo_mean_vector' (for averaging collected n-gram embeddings)
 
-drop function if exists demo_get_sentence_vectors;
 CREATE OR REPLACE FUNCTION demo_get_sentence_vectors(
     input_text TEXT
 )
