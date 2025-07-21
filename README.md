@@ -72,6 +72,25 @@ ORDER BY
 LIMIT 10;
 ```
 
+For example if using the SEC filing samples provided an input of "blackrock" should yield the following:
+
+```
+  id   |   content    |       distance        
+-------+--------------+-----------------------
+  3392 | blackrock    |                     0
+  3382 | blackford    | 0.0015255022329086676
+  3386 | blackhorn    | 0.0015742559061708173
+  3389 | blackmoor    | 0.0016545978675848365
+  3482 | blackthorn   |  0.001757043087620641
+  2694 | ballyrock    | 0.0017682801221411647
+  3379 | blackcrown   | 0.0018006063100480256
+ 20387 | rockhampton  | 0.0018389466576044853
+ 20385 | rocketshipvc | 0.0018785837274383392
+ 22581 | stockbridge  | 0.0018913135623307414
+(10 rows)
+```
+
+
 -----
 
 ## 🔧 Customization
