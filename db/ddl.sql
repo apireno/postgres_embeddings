@@ -16,7 +16,7 @@ CREATE INDEX idx_embedding_word ON embedding (word);
 CREATE TABLE sample_content (
     id bigserial PRIMARY KEY,
     content TEXT,          -- 'TEXT' is a common and flexible string type in PostgreSQL
-    embedding vector(100)                -- 'vector' type from the pgvector extension
-
+    embedding vector(50)                -- 'vector' type from the pgvector extension
+);
 
 CREATE INDEX ON sample_content USING hnsw (embedding vector_l2_ops);
