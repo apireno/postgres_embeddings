@@ -20,6 +20,7 @@ echo "--- Executing vector search for: \"$USER_INPUT_SENTENCE\" ---"
 # Then, we use the '<->' operator (L2 distance) from pgvector to find the closest embeddings.
 # The result is ordered by distance (smallest distance means highest similarity) and limited to 10.
 psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" <<EOF
+    
     SELECT
         id,
         content,
