@@ -1,69 +1,120 @@
 #!/bin/bash
 
-# PostgreSQL connection details. Adjust these if your setup is different.
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
+# --- Configuration ---
 DB_NAME="vector_demo_db"
 DB_USER="postgres" # Default PostgreSQL superuser. Change if you have a different user.
 DB_HOST="localhost"
 DB_PORT="5432"
 export PGPASSWORD=root
 
-# --- 1. Database Setup ---
-echo "--- Setting up database: $DB_NAME ---"
+# GloVe Model Configuration
+GLOVE_URL="https://nlp.stanford.edu/data/glove.6B.zip"
+GLOVE_ZIP_FILE="db/glove.6B.zip"
 
-# Drop and recreate the database to ensure a clean slate.
-echo "Dropping existing database '$DB_NAME' if it exists..."
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -c "DROP DATABASE IF EXISTS $DB_NAME;" > /dev/null 2>&1
 
-echo "Creating database '$DB_NAME'..."
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -c "CREATE DATABASE $DB_NAME;" > /dev/null 2>&1
-echo "Database '$DB_NAME' created."
+
+# File paths
+DDL_FILE="db/ddl.sql"
+FUNCTIONS_FILE="db/functions.sql"
+
+EMBEDDING_SRC_FILE="db/glove.6B.50d.txt"
+EMBEDDING_TSV_FILE="db/glove.6B.50d.tsv"
+
+
+# --- 1. Download and Prepare GloVe Model ---
+echo "--- Checking for embedding model: $EMBEDDING_SRC_FILE ---"
+
+# Check if the final model text file exists
+if [ ! -f "$EMBEDDING_SRC_FILE" ]; then
+    echo "Model file not found."
+    
+    # If the text file doesn't exist, check for the zip file
+    if [ ! -f "$GLOVE_ZIP_FILE" ]; then
+        echo "Downloading GloVe model from $GLOVE_URL..."
+        # Use curl to download the file
+        curl -L -o "$GLOVE_ZIP_FILE" "$GLOVE_URL"
+        echo "Download complete."
+    fi
+    
+    echo "Unzipping model..."
+    # Unzip the archive into the db/ directory, overwriting if necessary
+    unzip -o "$GLOVE_ZIP_FILE" -d db/
+    echo "Unzip complete."
+else
+    echo "Found existing model file. Skipping download."
+fi
+
+
+# Connect to the default 'postgres' database to perform maintenance.
+# This is necessary to terminate connections before dropping the target database.
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres <<-EOSQL
+    -- 🤖 Terminate all other connections to the target database
+    SELECT 
+        pg_terminate_backend(pid) 
+    FROM 
+        pg_stat_activity 
+    WHERE 
+        datname = '$DB_NAME' AND pid <> pg_backend_pid();
+
+    -- Drop and recreate the database for a clean slate
+    DROP DATABASE IF EXISTS $DB_NAME;
+    CREATE DATABASE $DB_NAME;
+EOSQL
+
+echo "Database '$DB_NAME' created and all old connections terminated."
+
+# Connect to the new database to run subsequent commands
+PSQL_CMD="psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME"
 
 echo "Creating the pgvector extension..."
-# Connect to the newly created database and create the extension.
-# Using IF NOT EXISTS prevents errors if it somehow already exists.
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS vector;" > /dev/null 2>&1
-echo "pgvector extension created."
+$PSQL_CMD -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
-# Connect to the newly created/existing database and execute DDL from db/ddl.sql.
-echo "--- Loading DDL from db/ddl.sql ---"
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f db/ddl.sql > /dev/null 2>&1
-echo "DDL loaded."
+echo "Loading DDL from '$DDL_FILE'..."
+$PSQL_CMD -f "$DDL_FILE"
 
-# Load all PL/pgSQL functions from the 'db/functions.sql' file.
-echo "--- Loading functions from db/functions.sql ---"
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f db/functions.sql > /dev/null 2>&1
-echo "Functions loaded."
+echo "Loading functions from '$FUNCTIONS_FILE'..."
+$PSQL_CMD -f "$FUNCTIONS_FILE"
 
-# --- 2. Upload Embedding Data ---
-echo "--- Uploading embedding data from db/sample_embedding_model.txt ---"
 
-# Clear existing data from the 'embedding' table to prevent primary key conflicts on re-run.
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "TRUNCATE TABLE embedding RESTART IDENTITY;" > /dev/null 2>&1
+# --- 2. Prepare and Upload Embedding Data ---
+echo "--- Preparing embedding model for bulk import ---"
+# Convert the space-delimited model file to a tab-separated format suitable for \COPY
 
-# Count total lines for the progress counter
-TOTAL_EMBEDDING_LINES=$(wc -l < db/sample_embedding_model.txt)
-CURRENT_EMBEDDING_LINE=0
 
-# Read 'db/sample_embedding_model.txt' line by line.
-# Each line is expected to be "word coeff1 coeff2 coeff3 ..."
-while IFS= read -r line || [[ -n "$line" ]]; do # '|| [[ -n "$line" ]]' handles the last line if it doesn't end with a newline
-    ((CURRENT_EMBEDDING_LINE++))
-    printf "\rProcessing embedding row %d of %d..." "$CURRENT_EMBEDDING_LINE" "$TOTAL_EMBEDDING_LINES"
+awk '{
+    word = $1;
+    # If the word is a single backslash, escape it by doubling it to \\
+    if (word == "\\") {
+        word = "\\\\";
+    }
+    $1 = "";
+    gsub(/^[ \t]+|[ \t]+$/, "", $0);
+    gsub(/[ \t]+/, ",", $0);
+    printf "%s\t[%s]\n", word, $0;
+}' "$EMBEDDING_SRC_FILE" > "$EMBEDDING_TSV_FILE"
 
-    # Use awk to extract the first word and the rest of the line (coefficients).
-    word=$(echo "$line" | awk '{print $1}')
-    # Replace spaces with commas and remove leading space for valid float[] array format.
-    coeffs=$(echo "$line" | awk '{$1=""; print $0}' | sed 's/^ //; s/ /,/g')
+echo "Conversion complete. Temporary file created at '$EMBEDDING_TSV_FILE'."
 
-    # Only attempt insert if both word and coefficients are present.
-    if [[ -n "$word" && -n "$coeffs" ]]; then
-        # Construct the SQL INSERT statement.
-        # Single quotes within the word need to be escaped by doubling them (e.g., 'O''Reilly').
-        ESCAPED_WORD=$(echo "$word" | sed "s/'/''/g")
-        INSERT_SQL="INSERT INTO embedding (word, embedding) VALUES ('$ESCAPED_WORD', '[$coeffs]');"
-        
-        # Execute the INSERT statement using psql, suppressing output.
-        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "$INSERT_SQL" > /dev/null 2>&1
-    fi
-done < db/sample_embedding_model.txt
-printf "\nEmbedding data uploaded. (%d rows)\n" "$CURRENT_EMBEDDING_LINE"
+echo "--- Uploading embedding data using \COPY ---"
+
+# Use \COPY, which reads from the client filesystem where this script is running.
+$PSQL_CMD <<-EOSQL
+    TRUNCATE TABLE embedding;
+    \COPY embedding(word, embedding) FROM '$EMBEDDING_TSV_FILE' WITH (FORMAT text, DELIMITER E'\t');
+EOSQL
+
+
+# --- 3. Verification and Cleanup ---
+# Get the final row count directly from the database
+ROW_COUNT=$($PSQL_CMD -t -c "SELECT COUNT(*) FROM embedding;")
+
+# Clean up the temporary .tsv file
+# rm "$EMBEDDING_TSV_FILE"
+echo "Temporary file '$EMBEDDING_TSV_FILE' removed."
+
+# Print final success message (xargs trims whitespace from psql output)
+echo
+echo "✅ Success! Uploaded $(echo $ROW_COUNT | xargs) embeddings into the '$DB_NAME' database."
