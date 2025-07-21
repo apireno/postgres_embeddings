@@ -72,7 +72,7 @@ ORDER BY
 LIMIT 10;
 ```
 
-For example if using the movie sample and the term "dogs and cats" you shuld get the following results:
+For example if using the movie sample and the term "dogs and cats" you should get the following results:
 
 ```
   id   |                content                |      distance      
