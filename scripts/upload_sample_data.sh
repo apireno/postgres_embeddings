@@ -1,44 +1,55 @@
 #!/bin/bash
 
-# PostgreSQL connection details. Adjust these if your setup is different.
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
+# --- Configuration ---
 DB_NAME="vector_demo_db"
-DB_USER="postgres" # Default PostgreSQL superuser. Change if you have a different user.
+DB_USER="postgres"
 DB_HOST="localhost"
 DB_PORT="5432"
 export PGPASSWORD=root
 
-# --- 3. Upload Sample Content and Calculate Embedding ---
-echo "--- Uploading sample content from db/sample_content.csv and calculating embeddings ---"
+# File path for the sample content
+CONTENT_SRC_FILE="db/sample_content.csv"
 
-# Clear existing data from the 'sample_content' table.
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "TRUNCATE TABLE sample_content RESTART IDENTITY;" > /dev/null 2>&1
 
-# Count total lines for the progress counter
-TOTAL_CONTENT_LINES=$(wc -l < db/sample_content.csv)
-CURRENT_CONTENT_LINE=0
+# --- 3. Upload Sample Content and Calculate Embeddings ---
+echo "--- Bulk uploading content from '$CONTENT_SRC_FILE' and calculating embeddings ---"
 
-# Read 'db/sample_content.csv' line by line.
-# Each line is expected to be a single text string.
-while IFS= read -r line || [[ -n "$line" ]]; do
-    ((CURRENT_CONTENT_LINE++))
-    printf "\rProcessing content row %d of %d..." "$CURRENT_CONTENT_LINE" "$TOTAL_CONTENT_LINES"
+# Use a psql heredoc for a clean, multi-line, and efficient command
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" <<-EOSQL
 
-    # Escape single quotes in the content text for SQL insertion.
-    content_text=$(echo "$line" | sed "s/'/''/g")
+    -- Clear existing data from the final table
+    TRUNCATE TABLE sample_content RESTART IDENTITY;
 
-    if [[ -n "$content_text" ]]; then
-        # Construct the SQL INSERT statement.
-        # Call 'fn::content_to_vector' directly in the INSERT statement to calculate the embedding.
-        # Cast the result to 'vector' type as demo_content_to_vector returns float[].
-        INSERT_SQL="INSERT INTO sample_content (content, embedding) VALUES ('$content_text', \"demo_content_to_vector\"('$content_text'));"
-        
-        # Execute the INSERT statement, suppressing output.
-        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "$INSERT_SQL" > /dev/null 2>&1
-    fi
-done < db/sample_content.csv
-printf "\nSample content uploaded and embeddings calculated. (%d rows)\n" "$CURRENT_CONTENT_LINE"
+    -- Step 1: Create a temporary staging table to hold the raw content.
+    -- This table is automatically dropped at the end of the session.
+    CREATE TEMP TABLE content_stage (content TEXT);
 
-# --- 4. Prompt User for Input and Execute Vector Search ---
-echo ""
+    -- Step 2: Use \COPY to bulk load the content file into the staging table.
+    -- This is significantly faster than a one-by-one insert.
+    \COPY content_stage(content) FROM '$CONTENT_SRC_FILE' WITH (FORMAT text);
 
+    -- Step 3: In a single transaction, insert into the final table by selecting
+    -- from the staging table and calling the function for each row.
+    INSERT INTO sample_content (content, embedding)
+    SELECT
+        content,
+        "demo_content_to_vector"(content)
+    FROM
+        content_stage;
+
+EOSQL
+
+
+# --- 4. Verification ---
+ROW_COUNT=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM sample_content;")
+
+# xargs trims whitespace from the psql output
+echo
+echo "✅ Success! Bulk loaded and processed $(echo $ROW_COUNT | xargs) content rows."
+echo
+
+# --- 5. Prompt User for Input and Execute Vector Search ---
 echo "Script finished."
