@@ -25,7 +25,7 @@ The primary goal of this project is to show how you can:
       * `demo_generate_edgengrams`: Handles out-of-vocabulary (OOV) words using n-grams.
       * `demo_get_sentence_vectors`: Retrieves vectors for a given blob of text.
       * `demo_content_to_vector`: Returns a representative mean vector for a blob of text.
-  * **Sample Data**: Includes a sample word embedding model (trained with fastText on a list of SEC-registered firms) and corresponding content.
+  * **Sample Data**: Random movie review content and the embeddings are expected to be GloVe pre-trained 6B 50 token model (glove.6B.50d.txt).
 
 -----
 
@@ -72,22 +72,23 @@ ORDER BY
 LIMIT 10;
 ```
 
-For example if using the SEC filing samples provided an input of "blackrock" should yield the following:
+For example if using the movie sample and the term "dogs and cats" you shuld get the following results:
 
 ```
-  id   |   content    |       distance        
--------+--------------+-----------------------
-  3392 | blackrock    |                     0
-  3382 | blackford    | 0.0015255022329086676
-  3386 | blackhorn    | 0.0015742559061708173
-  3389 | blackmoor    | 0.0016545978675848365
-  3482 | blackthorn   |  0.001757043087620641
-  2694 | ballyrock    | 0.0017682801221411647
-  3379 | blackcrown   | 0.0018006063100480256
- 20387 | rockhampton  | 0.0018389466576044853
- 20385 | rocketshipvc | 0.0018785837274383392
- 22581 | stockbridge  | 0.0018913135623307414
+  id   |                content                |      distance      
+-------+---------------------------------------+--------------------
+ 38814 | "he also chases cats                  |  1.126358589416041
+ 57057 | "why aren't they "" dog animals "" ?" | 1.2264580651791586
+ 56839 | "the animals themselves               | 1.2694676309930952
+ 40272 | "they're these octopus men            | 1.3394634719230951
+ 34447 | "i love animals                       | 1.4022585702172772
+ 33552 | "that's some ape . """                | 1.4305203206106698
+ 35264 | "they even have animals               | 1.4411370250826556
+ 19463 | "ghost dog lives                      | 1.4886350836870779
+ 42335 | humans .                              | 1.5341574644813925
+ 49885 | "they are not creatures               |  1.539828656808244
 (10 rows)
+
 ```
 
 
@@ -108,5 +109,8 @@ To do this, you would need to modify the `setup_db_and_upload` and `upload_sampl
 
   * **pgvector**: [https://github.com/pgvector/pgvector](https://github.com/pgvector/pgvector)
   * **fastText**: [https://fasttext.cc/](https://fasttext.cc/)
+  * **GloVe**: [https://nlp.stanford.edu/projects/glove/](https://nlp.stanford.edu/projects/glove/)
+
+  
 
 A big thank you to the creators and maintainers of these powerful open-source tools\!
